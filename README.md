@@ -1,3 +1,17 @@
+## Disclaimer
+
+This is based on:
+
+https://github.com/backtail/daisy-blank
+
+https://github.com/backtail/libdaisy-rust
+
+and the examples in:
+
+https://github.com/stm32-rs/stm32h7xx-hal/
+
+Just for personal testing on daisy seed rev 5.
+
 ## State
 
 It's not working yet...
