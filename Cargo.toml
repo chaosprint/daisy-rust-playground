@@ -1,5 +1,5 @@
 [package]
-name = "daisy-sigout-rs"
+name = "daisy-rust-raw"
 version = "0.1.0"
 edition = "2021"
 
