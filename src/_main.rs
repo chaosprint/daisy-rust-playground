@@ -283,9 +283,6 @@ fn main() -> ! {
         cortex_m::asm::isb();
     }
 
-    // changed
-    core.SCB.enable_icache();
-    core.SCB.enable_dcache(&mut core.CPUID);
     // - configure dma1 -------------------------------------------------------
     let dma1_streams =
         dma::dma::StreamsTuple::new(dp.DMA1, ccdr.peripheral.DMA1);
@@ -442,6 +439,10 @@ fn main() -> ! {
         // From the reference manual (rev7 page 2259)
         sai1.try_send(0, 0).unwrap();
     });
+
+    // changed, the order matters.
+    core.SCB.enable_icache();
+    core.SCB.enable_dcache(&mut core.CPUID);
 
     // - dma1 stream 1 interrupt handler --------------------------------------
 
