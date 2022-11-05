@@ -399,7 +399,7 @@ fn main() -> ! {
                 let mono = libm::sinf(*PHASE * 2.0 * core::f32::consts::PI);
                 tx_buffer[tx0] = S24::from(mono).into();
                 tx_buffer[tx1] = S24::from(mono).into();
-                *PHASE += 440. / 48000.;
+                *PHASE += 1000. / 48000.;
                 if *PHASE >= 1.0 {
                     *PHASE -= 1.0;
                 }

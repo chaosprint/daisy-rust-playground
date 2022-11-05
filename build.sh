@@ -1,0 +1,1 @@
+cargo objcopy --release -- -O binary a.bin 
