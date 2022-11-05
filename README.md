@@ -12,10 +12,6 @@ https://github.com/stm32-rs/stm32h7xx-hal/
 
 Just for personal testing on daisy seed rev 5.
 
-## State
-
-It's not working yet...
-
 ## Usage
 
 1. install rust
