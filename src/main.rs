@@ -15,6 +15,7 @@ use stm32h7xx_hal::{
     sai::*,
     stm32,
     stm32::rcc::d2ccip1r::SAI1SEL_A,
+    rcc::rec::Sai1ClkSel,
     time,
     time::{Hertz, MegaHertz},
     traits::i2s::FullDuplex,
@@ -87,30 +88,30 @@ pub const MILLI: u32 = 1_000;
 pub const AUDIO_FRAME_RATE_HZ: u32 = 1_000;
 pub const AUDIO_BLOCK_SIZE: u16 = 48;
 pub const AUDIO_SAMPLE_RATE: usize = 48_000;
-pub const AUDIO_SAMPLE_HZ: Hertz = Hertz(48_000);
-pub const CLOCK_RATE_HZ: Hertz = Hertz(480_000_000_u32);
+pub const AUDIO_SAMPLE_HZ: Hertz = Hertz::from_raw(48_000);
+pub const CLOCK_RATE_HZ: Hertz = Hertz::from_raw(480_000_000_u32);
 
 
-const HSE_CLOCK_MHZ: MegaHertz = MegaHertz(16);
-const HCLK_MHZ: MegaHertz = MegaHertz(200);
-const HCLK2_MHZ: MegaHertz = MegaHertz(200);
+const HSE_CLOCK_MHZ: Hertz = Hertz::MHz(16);
+const HCLK_MHZ: MegaHertz = MegaHertz::from_raw(200);
+const HCLK2_MHZ: MegaHertz = MegaHertz::from_raw(200);
 
 // PCLKx
-const PCLK_HZ: Hertz = Hertz(CLOCK_RATE_HZ.0 / 4);
+const PCLK_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 4);
 // 49_152_344
 // PLL1
 const PLL1_P_HZ: Hertz = CLOCK_RATE_HZ;
-const PLL1_Q_HZ: Hertz = Hertz(CLOCK_RATE_HZ.0 / 18);
-const PLL1_R_HZ: Hertz = Hertz(CLOCK_RATE_HZ.0 / 32);
+const PLL1_Q_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 18);
+const PLL1_R_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 32);
 // PLL2
-const PLL2_P_HZ: Hertz = Hertz(4_000_000);
-const PLL2_Q_HZ: Hertz = Hertz(PLL2_P_HZ.0 / 2); // No divder given, what's the default?
-const PLL2_R_HZ: Hertz = Hertz(PLL2_P_HZ.0 / 4); // No divder given, what's the default?
+const PLL2_P_HZ: Hertz = Hertz::from_raw(4_000_000);
+const PLL2_Q_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 2); // No divder given, what's the default?
+const PLL2_R_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 4); // No divder given, what's the default?
                                                  // PLL3
                                                  // 48Khz * 256 = 12_288_000
-const PLL3_P_HZ: Hertz = Hertz(AUDIO_SAMPLE_HZ.0 * 257);
-const PLL3_Q_HZ: Hertz = Hertz(PLL3_P_HZ.0 / 4);
-const PLL3_R_HZ: Hertz = Hertz(PLL3_P_HZ.0 / 16);
+const PLL3_P_HZ: Hertz = Hertz::from_raw(AUDIO_SAMPLE_HZ.raw() * 257);
+const PLL3_Q_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 4);
+const PLL3_R_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 16);
 
 
 // - WM8731 codec register addresses -------------------------------------------------
@@ -266,7 +267,7 @@ fn main() -> ! {
             dma_config,
         );
     // info!("Setup up SAI...");
-    let sai1_rec = sai1_p.kernel_clk_mux(SAI1SEL_A::PLL3_P);
+    let sai1_rec = sai1_p.kernel_clk_mux(Sai1ClkSel::Pll3P);
     let master_config = I2SChanConfig::new(I2SDir::Rx)
     .set_frame_sync_active_high(false);
     let slave_config = I2SChanConfig::new(I2SDir::Tx)
@@ -305,9 +306,9 @@ fn main() -> ! {
         .modify(|_, w| w.dir().memory_to_peripheral());
 
     // info!("Setup up WM8731 Audio Codec...");
-    let i2c2_pins = (i2c_scl.into_alternate_af4(), i2c_sda.into_alternate_af4());
-
-    let mut i2c = i2c2_d.i2c(i2c2_pins, time::Hertz(100_000), i2c2_p, clocks);
+    // let i2c2_pins = (i2c_scl.into_alternate_af4(), i2c_sda.into_alternate_af4());
+    let i2c2_pins = (i2c_scl.into_alternate_open_drain::<4>(), i2c_sda.into_alternate_open_drain::<4>());
+    let mut i2c = i2c2_d.i2c(i2c2_pins, Hertz::from_raw(100_000), i2c2_p, clocks);
 
     let codec_i2c_address: u8 = 0x1a; // or 0x1b if CSB is high
 
@@ -342,7 +343,7 @@ fn main() -> ! {
 
         // wait until sai1's fifo starts to receive data
         // info!("Sai1 fifo waiting to receive data.");
-        while sai1_rb.chb.sr.read().flvl().is_empty() {}
+        while sai1_rb.chb().sr.read().flvl().is_empty() {}
         // info!("Audio started!");
         sai.enable();
         sai.try_send(0, 0).unwrap();
@@ -399,7 +400,7 @@ fn main() -> ! {
                 let mono = libm::sinf(*PHASE * 2.0 * core::f32::consts::PI);
                 tx_buffer[tx0] = S24::from(mono).into();
                 tx_buffer[tx1] = S24::from(mono).into();
-                *PHASE += 1000. / 48000.;
+                *PHASE += 880. / 48000.;
                 if *PHASE >= 1.0 {
                     *PHASE -= 1.0;
                 }
