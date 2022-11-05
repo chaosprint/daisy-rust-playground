@@ -1,3 +1,7 @@
+// mainly based on:
+// https://github.com/backtail/libdaisy-rust
+// https://github.com/stm32-rs/stm32h7xx-hal/
+
 #![no_main]
 #![no_std]
 
