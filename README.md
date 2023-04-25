@@ -1,16 +1,8 @@
-## Disclaimer
+# daisy-rust-lyd
 
-This is based on:
+Use [`lyd`](https://github.com/chaosprint/lyd) rust audio graph lib to make some sound on daisy board.
 
-https://github.com/backtail/daisy-blank
-
-https://github.com/backtail/libdaisy-rust
-
-and the examples in:
-
-https://github.com/stm32-rs/stm32h7xx-hal/
-
-Just for personal testing on daisy seed rev 5.
+Just a wip and you need to manually download both repo to get some sound.
 
 ## Usage
 
@@ -41,3 +33,17 @@ cargo objcopy --release -- -O binary a.bin
 ```
 dfu-util -a 0 -s 0x08000000 -D a.bin
 ```
+
+## Disclaimer
+
+This is based on:
+
+https://github.com/backtail/daisy-blank
+
+https://github.com/backtail/libdaisy-rust
+
+and the examples in:
+
+https://github.com/stm32-rs/stm32h7xx-hal/
+
+Tested on daisy seed rev 5.

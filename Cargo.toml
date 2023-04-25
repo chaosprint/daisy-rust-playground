@@ -1,5 +1,5 @@
 [package]
-name = "daisy-rust-raw"
+name = "daisy-rust-lyd"
 version = "0.1.0"
 edition = "2021"
 
@@ -23,6 +23,11 @@ cortex-m-log = { version = "~0.7.0", features = ["itm", "semihosting", "log-inte
 cortex-m-semihosting = "0.3.5"
 panic-itm = { version = "~0.4.1" }
 panic-semihosting = "0.6"
+lyd = {path = "../lyd", features = ["no_std"]}
+spin = "0.9.8"
+smallvec = "1.6.1"
+
+alloc-cortex-m = { version = "0.4.4"}
 
 [profile.dev]
 codegen-units = 1 # better optimizations

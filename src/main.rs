@@ -11,28 +11,31 @@ use stm32h7xx_hal::{
     i2c::*,
     pac, rcc,
     rcc::rec,
+    rcc::rec::Sai1ClkSel,
     sai,
     sai::*,
     stm32,
     stm32::rcc::d2ccip1r::SAI1SEL_A,
-    rcc::rec::Sai1ClkSel,
     time,
     time::{Hertz, MegaHertz},
     traits::i2s::FullDuplex,
 };
 
-use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::pac::interrupt;
+use stm32h7xx_hal::prelude::*;
 
 use cortex_m::asm;
-use cortex_m_rt::entry;
 use cortex_m::prelude::_embedded_hal_blocking_i2c_Write;
+use cortex_m_rt::entry;
 use num_enum::IntoPrimitive;
 
 mod logger;
 mod mpu;
 use mpu::dma_init;
 // use logger::*;
+
+#[macro_use]
+extern crate lazy_static;
 
 // Process samples at 1000 Hz
 // With a circular buffer(*2) in stereo (*2)
@@ -81,16 +84,14 @@ type DmaOutputStream = dma::Transfer<
 //     output_stream: DmaOutputStream,
 // }
 
-
 // - clocks
 
 pub const MILLI: u32 = 1_000;
 pub const AUDIO_FRAME_RATE_HZ: u32 = 1_000;
 pub const AUDIO_BLOCK_SIZE: u16 = 48;
-pub const AUDIO_SAMPLE_RATE: usize = 48_000;
+pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
 pub const AUDIO_SAMPLE_HZ: Hertz = Hertz::from_raw(48_000);
 pub const CLOCK_RATE_HZ: Hertz = Hertz::from_raw(480_000_000_u32);
-
 
 const HSE_CLOCK_MHZ: Hertz = Hertz::MHz(16);
 const HCLK_MHZ: MegaHertz = MegaHertz::from_raw(200);
@@ -107,12 +108,11 @@ const PLL1_R_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 32);
 const PLL2_P_HZ: Hertz = Hertz::from_raw(4_000_000);
 const PLL2_Q_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 2); // No divder given, what's the default?
 const PLL2_R_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 4); // No divder given, what's the default?
-                                                 // PLL3
-                                                 // 48Khz * 256 = 12_288_000
+                                                               // PLL3
+                                                               // 48Khz * 256 = 12_288_000
 const PLL3_P_HZ: Hertz = Hertz::from_raw(AUDIO_SAMPLE_HZ.raw() * 257);
 const PLL3_Q_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 4);
 const PLL3_R_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 16);
-
 
 // - WM8731 codec register addresses -------------------------------------------------
 
@@ -155,27 +155,67 @@ const REGISTER_CONFIG: &[(Register, u8)] = &[
     (Register::ACTIVE, 0x01),
 ];
 
+use alloc_cortex_m::CortexMHeap;
+use core::alloc::Layout;
+
+#[global_allocator]
+static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
+
+const HEAP_START: usize = 0x24020000;
+const HEAP_SIZE: usize = (512 - 128) * 1024; // 384KB
+
+pub fn init_allocator(heap_start: usize, heap_size: usize) {
+    unsafe { ALLOCATOR.init(heap_start, heap_size) }
+}
+
+use lyd::*;
+use smallvec::SmallVec;
+
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+static AUDIO_PROCESS_FLAG: AtomicBool = AtomicBool::new(false);
+lazy_static! {
+    static ref CTX: spin::RwLock<lyd::Context> = {
+        spin::RwLock::new(context().channels(2).frames(1024).sr(48000).build(&[
+            &[sin_osc().freq(1), add(0.1)],
+            &[sin_osc().freq(10.0).amp(300.), add(500.1)],
+        ]))
+    };
+}
+
+static AUDIO_BUFFER_PTR: AtomicPtr<SmallVec<[f32; 1024]>> = AtomicPtr::new(core::ptr::null_mut());
+
 #[entry]
 fn main() -> ! {
-
+    init_allocator(HEAP_START, HEAP_SIZE);
     // system init
     // let mut core: rtic::export::Peripherals = ;
-    // this is different 
+    // this is different
     let mut core = stm32h7xx_hal::device::CorePeripherals::take().unwrap();
 
     let device: stm32::Peripherals = pac::Peripherals::take().unwrap();
 
     // let pwr: stm32::PWR = device.PWR;
-    
+
     // let rcc: stm32::RCC = device.RCC;
-    
+
     let syscfg: &stm32::SYSCFG = &device.SYSCFG;
+
+    // let mut vec: smallvec::SmallVec<[smallvec::SmallVec<[f32; 1024]>; 2]> =
+    // smallvec::smallvec![smallvec::smallvec![0.0; 1024]; 2];
+
+    // for x in vec.iter_mut() {
+    //     for y in x.iter_mut() {
+    //         *y = 1.0;
+    //     }
+    // }
 
     // system init clocks
     let pwr = device.PWR.constrain();
     let vos = pwr.vos0(syscfg).freeze();
 
-    let ccdr = device.RCC.constrain()
+    let ccdr = device
+        .RCC
+        .constrain()
         .use_hse(HSE_CLOCK_MHZ)
         .sys_ck(CLOCK_RATE_HZ)
         .pclk1(PCLK_HZ) // DMA clock
@@ -195,8 +235,6 @@ fn main() -> ! {
         .pll3_r_ck(PLL3_R_HZ)
         .freeze(vos, &syscfg);
 
-
-
     // info!("Setting up GPIOs...");
     let gpioa = device.GPIOA.split(ccdr.peripheral.GPIOA);
     let gpiob = device.GPIOB.split(ccdr.peripheral.GPIOB);
@@ -207,7 +245,7 @@ fn main() -> ! {
     let gpiog = device.GPIOG.split(ccdr.peripheral.GPIOG);
     let gpioh = device.GPIOH.split(ccdr.peripheral.GPIOH);
     let gpioi = device.GPIOI.split(ccdr.peripheral.GPIOI);
-   
+
     // setting up audio
     let dma1_d: stm32::DMA1 = device.DMA1;
     let dma1_p: rec::Dma1 = ccdr.peripheral.DMA1;
@@ -215,22 +253,21 @@ fn main() -> ! {
     let sai1_p: rec::Sai1 = ccdr.peripheral.SAI1;
     let i2c2_d: stm32::I2C2 = device.I2C2;
     let i2c2_p: rec::I2c2 = ccdr.peripheral.I2C2;
-    
+
     // SAI pins
     let sai_mclk_a: gpioe::PE2<Analog> = gpioe.pe2;
     let sai_sd_b: gpioe::PE3<Analog> = gpioe.pe3;
     let sai_fs_a: gpioe::PE4<Analog> = gpioe.pe4;
     let sai_sck_a: gpioe::PE5<Analog> = gpioe.pe5;
     let sai_sd_a: gpioe::PE6<Analog> = gpioe.pe6;
-    
+
     //I2C pins
     let i2c_scl: gpioh::PH4<Analog> = gpioh.ph4;
     let i2c_sda: gpiob::PB11<Analog> = gpiob.pb11;
-    
+
     let clocks: &rcc::CoreClocks = &ccdr.clocks;
     let mpu: &mut cortex_m::peripheral::MPU = &mut core.MPU;
     let scb: &mut cortex_m::peripheral::SCB = &mut core.SCB;
-
 
     // info!("Setup up DMA...");
     dma_init(mpu, scb, START_OF_DRAM2 as *mut u32, DMA_MEM_SIZE);
@@ -244,8 +281,7 @@ fn main() -> ! {
         .circular_buffer(true)
         .fifo_enable(false);
 
-    let mut output_stream: dma::Transfer<_, _, dma::MemoryToPeripheral, _, _> =
-    dma::Transfer::init(
+    let mut output_stream: dma::Transfer<_, _, dma::MemoryToPeripheral, _, _> = dma::Transfer::init(
         dma1_streams.0,
         unsafe { pac::Peripherals::steal().SAI1 },
         rx_buffer,
@@ -258,22 +294,20 @@ fn main() -> ! {
     let dma_config = dma_config
         .transfer_complete_interrupt(true)
         .half_transfer_interrupt(true);
-    let mut input_stream: dma::Transfer<_, _, dma::PeripheralToMemory, _, _> =
-        dma::Transfer::init(
-            dma1_streams.1,
-            unsafe { pac::Peripherals::steal().SAI1 },
-            tx_buffer,
-            None,
-            dma_config,
-        );
+    let mut input_stream: dma::Transfer<_, _, dma::PeripheralToMemory, _, _> = dma::Transfer::init(
+        dma1_streams.1,
+        unsafe { pac::Peripherals::steal().SAI1 },
+        tx_buffer,
+        None,
+        dma_config,
+    );
     // info!("Setup up SAI...");
     let sai1_rec = sai1_p.kernel_clk_mux(Sai1ClkSel::Pll3P);
-    let master_config = I2SChanConfig::new(I2SDir::Rx)
-    .set_frame_sync_active_high(false);
+    let master_config = I2SChanConfig::new(I2SDir::Rx).set_frame_sync_active_high(false);
     let slave_config = I2SChanConfig::new(I2SDir::Tx)
         .set_sync_type(I2SSync::Internal)
         .set_frame_sync_active_high(false);
-    
+
     // SAI pins
     let pins_a = (
         sai_mclk_a.into_alternate_af6(),
@@ -282,7 +316,6 @@ fn main() -> ! {
         sai_sd_a.into_alternate_af6(),
         Some(sai_sd_b.into_alternate_af6()),
     );
-
 
     // Hand off to audio module
     let mut sai = sai1_d.i2s_ch_a(
@@ -307,7 +340,10 @@ fn main() -> ! {
 
     // info!("Setup up WM8731 Audio Codec...");
     // let i2c2_pins = (i2c_scl.into_alternate_af4(), i2c_sda.into_alternate_af4());
-    let i2c2_pins = (i2c_scl.into_alternate_open_drain::<4>(), i2c_sda.into_alternate_open_drain::<4>());
+    let i2c2_pins = (
+        i2c_scl.into_alternate_open_drain::<4>(),
+        i2c_sda.into_alternate_open_drain::<4>(),
+    );
     let mut i2c = i2c2_d.i2c(i2c2_pins, Hertz::from_raw(100_000), i2c2_p, clocks);
 
     let codec_i2c_address: u8 = 0x1a; // or 0x1b if CSB is high
@@ -374,10 +410,9 @@ fn main() -> ! {
     #[interrupt]
     fn DMA1_STR1() {
         static mut PHASE: f32 = 0.0;
-        let tx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] =
-            unsafe { &mut TX_BUFFER };
-        let rx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] =
-            unsafe { &mut RX_BUFFER };
+
+        let tx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] = unsafe { &mut TX_BUFFER };
+        let rx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] = unsafe { &mut RX_BUFFER };
 
         let stereo_block_length = tx_buffer.len() / 2;
 
@@ -391,25 +426,46 @@ fn main() -> ! {
             } else {
                 return;
             };
+            AUDIO_PROCESS_FLAG.store(true, Ordering::SeqCst);
+
+            let audio_buffer_ptr = AUDIO_BUFFER_PTR.load(Ordering::SeqCst);
+            if audio_buffer_ptr.is_null() {
+                return;
+            }
+
+            let audio_buffer = unsafe { &*audio_buffer_ptr };
+
+            // for i in 0..1024 {
+            //     let mono = audio_buffer[i];
+            //     // tx_buffer[i * 2] = S24::from(mono).into();
+            //     // tx_buffer[i * 2 + 1] = S24::from(mono).into();
+            // }
 
             let mut index = 0;
-            
             while index < stereo_block_length {
                 let tx0 = index + skip.0;
                 let tx1 = tx0 + 1;
-                let mono = libm::sinf(*PHASE * 2.0 * core::f32::consts::PI);
+                let mono = audio_buffer[index / 2];
+                // let mono = libm::sinf(*PHASE * 2.0 * core::f32::consts::PI);
                 tx_buffer[tx0] = S24::from(mono).into();
                 tx_buffer[tx1] = S24::from(mono).into();
-                *PHASE += 880. / 48000.;
-                if *PHASE >= 1.0 {
-                    *PHASE -= 1.0;
-                }
+                // *PHASE += 440. / 48000.;
+                // if *PHASE >= 1.0 {
+                //     *PHASE -= 1.0;
+                // }
                 index += 2;
             }
         }
     }
 
     loop {
+        if AUDIO_PROCESS_FLAG.load(Ordering::SeqCst) {
+            AUDIO_PROCESS_FLAG.store(false, Ordering::SeqCst);
+            let mut ctx = CTX.write();
+            let buf = ctx.next_block().as_mut_ptr();
+            AUDIO_BUFFER_PTR.store(buf, Ordering::SeqCst);
+        }
+
         asm::wfi();
     }
 }
