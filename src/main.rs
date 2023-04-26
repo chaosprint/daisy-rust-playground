@@ -4,6 +4,10 @@
 
 #![no_main]
 #![no_std]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(deprecated)]
+#![allow(dead_code)]
 
 use stm32h7xx_hal::{
     dma,
@@ -12,11 +16,8 @@ use stm32h7xx_hal::{
     pac, rcc,
     rcc::rec,
     rcc::rec::Sai1ClkSel,
-    sai,
     sai::*,
     stm32,
-    stm32::rcc::d2ccip1r::SAI1SEL_A,
-    time,
     time::{Hertz, MegaHertz},
     traits::i2s::FullDuplex,
 };
@@ -29,10 +30,13 @@ use cortex_m::prelude::_embedded_hal_blocking_i2c_Write;
 use cortex_m_rt::entry;
 use num_enum::IntoPrimitive;
 
-mod logger;
+mod num;
+use num::*;
+
 mod mpu;
 use mpu::dma_init;
-// use logger::*;
+
+mod logger;
 
 #[macro_use]
 extern crate lazy_static;
@@ -52,11 +56,7 @@ static mut TX_BUFFER: DmaBuffer = [0; DMA_BUFFER_SIZE];
 #[link_section = ".sram1_bss"]
 #[no_mangle]
 static mut RX_BUFFER: DmaBuffer = [0; DMA_BUFFER_SIZE];
-const FBIPMAX: f32 = 0.999985;
-const FBIPMIN: f32 = -FBIPMAX;
-const F32_TO_S24_SCALE: f32 = 8388608.0; // 2 ** 23
-const S24_TO_F32_SCALE: f32 = 1.0 / F32_TO_S24_SCALE;
-const S24_SIGN: i32 = 0x800000;
+
 /// Largest number of audio blocks for a single DMA operation
 pub const MAX_TRANSFER_SIZE: usize = BLOCK_SIZE_MAX * 2;
 pub type AudioBuffer = [(f32, f32); BLOCK_SIZE_MAX];
@@ -68,24 +68,15 @@ type DmaInputStream = dma::Transfer<
     &'static mut [u32; DMA_BUFFER_SIZE],
     dma::DBTransfer,
 >;
-type DmaOutputStream = dma::Transfer<
-    dma::dma::Stream0<stm32::DMA1>,
-    stm32::SAI1,
-    dma::MemoryToPeripheral,
-    &'static mut [u32; DMA_BUFFER_SIZE],
-    dma::DBTransfer,
->;
-
-// pub struct Audio {
-//     sai: sai::Sai<stm32::SAI1, sai::I2S>,
-//     input: Input,
-//     output: Output,
-//     input_stream: DmaInputStream,
-//     output_stream: DmaOutputStream,
-// }
+// type DmaOutputStream = dma::Transfer<
+//     dma::dma::Stream0<stm32::DMA1>,
+//     stm32::SAI1,
+//     dma::MemoryToPeripheral,
+//     &'static mut [u32; DMA_BUFFER_SIZE],
+//     dma::DBTransfer,
+// >;
 
 // - clocks
-
 pub const MILLI: u32 = 1_000;
 pub const AUDIO_FRAME_RATE_HZ: u32 = 1_000;
 pub const AUDIO_BLOCK_SIZE: u16 = 48;
@@ -94,8 +85,8 @@ pub const AUDIO_SAMPLE_HZ: Hertz = Hertz::from_raw(48_000);
 pub const CLOCK_RATE_HZ: Hertz = Hertz::from_raw(480_000_000_u32);
 
 const HSE_CLOCK_MHZ: Hertz = Hertz::MHz(16);
-const HCLK_MHZ: MegaHertz = MegaHertz::from_raw(200);
-const HCLK2_MHZ: MegaHertz = MegaHertz::from_raw(200);
+// const HCLK_MHZ: MegaHertz = MegaHertz::from_raw(200);
+// const HCLK2_MHZ: MegaHertz = MegaHertz::from_raw(200);
 
 // PCLKx
 const PCLK_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 4);
@@ -106,10 +97,10 @@ const PLL1_Q_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 18);
 const PLL1_R_HZ: Hertz = Hertz::from_raw(CLOCK_RATE_HZ.raw() / 32);
 // PLL2
 const PLL2_P_HZ: Hertz = Hertz::from_raw(4_000_000);
-const PLL2_Q_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 2); // No divder given, what's the default?
-const PLL2_R_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 4); // No divder given, what's the default?
-                                                               // PLL3
-                                                               // 48Khz * 256 = 12_288_000
+// const PLL2_Q_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 2); // No divder given, what's the default?
+// const PLL2_R_HZ: Hertz = Hertz::from_raw(PLL2_P_HZ.raw() / 4); // No divder given, what's the default?
+// PLL3
+// 48Khz * 256 = 12_288_000
 const PLL3_P_HZ: Hertz = Hertz::from_raw(AUDIO_SAMPLE_HZ.raw() * 257);
 const PLL3_Q_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 4);
 const PLL3_R_HZ: Hertz = Hertz::from_raw(PLL3_P_HZ.raw() / 16);
@@ -156,7 +147,6 @@ const REGISTER_CONFIG: &[(Register, u8)] = &[
 ];
 
 use alloc_cortex_m::CortexMHeap;
-use core::alloc::Layout;
 
 #[global_allocator]
 static ALLOCATOR: CortexMHeap = CortexMHeap::empty();
@@ -191,23 +181,8 @@ fn main() -> ! {
     // let mut core: rtic::export::Peripherals = ;
     // this is different
     let mut core = stm32h7xx_hal::device::CorePeripherals::take().unwrap();
-
     let device: stm32::Peripherals = pac::Peripherals::take().unwrap();
-
-    // let pwr: stm32::PWR = device.PWR;
-
-    // let rcc: stm32::RCC = device.RCC;
-
     let syscfg: &stm32::SYSCFG = &device.SYSCFG;
-
-    // let mut vec: smallvec::SmallVec<[smallvec::SmallVec<[f32; 1024]>; 2]> =
-    // smallvec::smallvec![smallvec::smallvec![0.0; 1024]; 2];
-
-    // for x in vec.iter_mut() {
-    //     for y in x.iter_mut() {
-    //         *y = 1.0;
-    //     }
-    // }
 
     // system init clocks
     let pwr = device.PWR.constrain();
@@ -392,16 +367,6 @@ fn main() -> ! {
     scb.enable_icache();
     scb.enable_dcache(&mut core.CPUID);
     // - dma1 stream 1 interrupt handler --------------------------------------
-
-    // type TransferDma1Str1 = dma::Transfer<
-    //     dma::dma::Stream1<stm32::DMA1>,
-    //     // sai::dma::ChannelA<stm32::SAI1>,
-    //     stm32::SAI1,
-    //     dma::PeripheralToMemory,
-    //     &'static mut [u32; DMA_BUFFER_LENGTH],
-    //     dma::DBTransfer,
-    // >;
-
     static mut TRANSFER_DMA_INPUT_STREAM: Option<DmaInputStream> = None;
     unsafe {
         TRANSFER_DMA_INPUT_STREAM = Some(input_stream);
@@ -409,10 +374,10 @@ fn main() -> ! {
 
     #[interrupt]
     fn DMA1_STR1() {
-        static mut PHASE: f32 = 0.0;
+        // static mut PHASE: f32 = 0.0;
 
         let tx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] = unsafe { &mut TX_BUFFER };
-        let rx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] = unsafe { &mut RX_BUFFER };
+        // let rx_buffer: &'static mut [u32; DMA_BUFFER_SIZE] = unsafe { &mut RX_BUFFER };
 
         let stereo_block_length = tx_buffer.len() / 2;
 
@@ -434,12 +399,6 @@ fn main() -> ! {
             }
 
             let audio_buffer = unsafe { &*audio_buffer_ptr };
-
-            // for i in 0..1024 {
-            //     let mono = audio_buffer[i];
-            //     // tx_buffer[i * 2] = S24::from(mono).into();
-            //     // tx_buffer[i * 2 + 1] = S24::from(mono).into();
-            // }
 
             let mut index = 0;
             while index < stereo_block_length {
@@ -467,51 +426,5 @@ fn main() -> ! {
         }
 
         asm::wfi();
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct S24(i32);
-
-impl From<i32> for S24 {
-    fn from(x: i32) -> S24 {
-        S24(x)
-    }
-}
-
-impl From<u32> for S24 {
-    fn from(x: u32) -> S24 {
-        S24(x as i32)
-    }
-}
-
-impl From<S24> for i32 {
-    fn from(x: S24) -> i32 {
-        x.0
-    }
-}
-
-impl From<S24> for u32 {
-    fn from(x: S24) -> u32 {
-        x.0 as u32
-    }
-}
-
-impl From<f32> for S24 {
-    fn from(x: f32) -> S24 {
-        let x = if x <= FBIPMIN {
-            FBIPMIN
-        } else if x >= FBIPMAX {
-            FBIPMAX
-        } else {
-            x
-        };
-        S24((x * F32_TO_S24_SCALE) as i32)
-    }
-}
-
-impl From<S24> for f32 {
-    fn from(x: S24) -> f32 {
-        ((x.0 ^ S24_SIGN) - S24_SIGN) as f32 * S24_TO_F32_SCALE
     }
 }
