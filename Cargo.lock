@@ -130,7 +130,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "daisy-rust"
+name = "daisy-rust-playground"
 version = "0.1.0"
 dependencies = [
  "alloc-cortex-m",
