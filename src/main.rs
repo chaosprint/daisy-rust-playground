@@ -166,8 +166,8 @@ static AUDIO_PROCESS_FLAG: AtomicBool = AtomicBool::new(false);
 lazy_static! {
     static ref CTX: spin::RwLock<lyd::Context> = {
         spin::RwLock::new(context().channels(2).frames(1024).sr(48000).build(&[
-            &[sin_osc().freq(1), add(0.1)],
-            &[sin_osc().freq(10.0).amp(300.), add(500.1)],
+            ("~mod", &[sin_osc().freq(100.0).amp(300.), add(900.1)]),
+            ("out", &[sin_osc().freq("~mod"), add(0.1)]),
         ]))
     };
 }
