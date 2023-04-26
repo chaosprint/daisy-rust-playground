@@ -130,7 +130,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "daisy-rust-lyd"
+name = "daisy-rust"
 version = "0.1.0"
 dependencies = [
  "alloc-cortex-m",
@@ -242,7 +242,9 @@ dependencies = [
 
 [[package]]
 name = "lyd"
-version = "0.0.1-alpha.3"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02c498f139d2247b143069e41517aa0c7b489313e3968c08af2776dd833bee98"
 dependencies = [
  "hashbrown",
  "libm",

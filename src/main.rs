@@ -159,24 +159,51 @@ pub fn init_allocator(heap_start: usize, heap_size: usize) {
 }
 
 use lyd::*;
+// use ljud::*;
 use smallvec::SmallVec;
 
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 static AUDIO_PROCESS_FLAG: AtomicBool = AtomicBool::new(false);
-lazy_static! {
-    static ref CTX: spin::RwLock<lyd::Context> = {
-        spin::RwLock::new(context().channels(2).frames(1024).sr(48000).build(&[
-            ("~mod", &[sin_osc().freq(100.0).amp(300.), add(900.1)]),
-            ("out", &[sin_osc().freq("~mod"), add(0.1)]),
-        ]))
-    };
-}
+// lazy_static! {
+//     static ref CTX: spin::RwLock<lyd::Context> = {
+//         spin::RwLock::new(context().channels(2).frames(1024).sr(48000).build(&[
+//             ("~mod", &[sin_osc().freq(100.0).amp(300.), add(900.1)]),
+//             ("out", &[sin_osc().freq("~mod"), add(0.1)]),
+//         ]))
+//     };
+// }
 
+static mut CTX: Option<Context> = None;
 static AUDIO_BUFFER_PTR: AtomicPtr<SmallVec<[f32; 1024]>> = AtomicPtr::new(core::ptr::null_mut());
 
 #[entry]
 fn main() -> ! {
     init_allocator(HEAP_START, HEAP_SIZE);
+
+    unsafe {
+        CTX = Some(context().channels(2).frames(1024).sr(48000).build(&[
+            ("~mod", &[sin_osc().freq(6.0).amp(400.), add(500.1)]),
+            ("out", &[sin_osc().freq("~mod"), add(0.1)]),
+        ]));
+    }
+
+    // unsafe {
+    //     CTX = Some(
+    //         Context::new()
+    //             .channels(2)
+    //             .buffer_size(1024)
+    //             .sample_rate(48000)
+    //             .set_graph(svec![("output", svec![sin_osc().freq(1000.).boxed()])]),
+    //     );
+    // }
+
+    // fm seems to be too heavy
+    // (
+    //     "~fm",
+    //     svec![sin_osc().freq(20.).amp(400.).boxed(), add(500.)],
+    // ),
+    // ("output", svec![sin_osc().freq("fm").boxed()]),
+
     // system init
     // let mut core: rtic::export::Peripherals = ;
     // this is different
@@ -420,9 +447,13 @@ fn main() -> ! {
     loop {
         if AUDIO_PROCESS_FLAG.load(Ordering::SeqCst) {
             AUDIO_PROCESS_FLAG.store(false, Ordering::SeqCst);
-            let mut ctx = CTX.write();
-            let buf = ctx.next_block().as_mut_ptr();
-            AUDIO_BUFFER_PTR.store(buf, Ordering::SeqCst);
+            // let mut ctx = CTX.lock();
+            // let buf = ctx.next_block().as_mut_ptr();
+            unsafe {
+                let ctx = CTX.as_mut().unwrap();
+                let buf = ctx.next_block().as_mut_ptr();
+                AUDIO_BUFFER_PTR.store(buf, Ordering::SeqCst);
+            }
         }
 
         asm::wfi();

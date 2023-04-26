@@ -1,5 +1,5 @@
 [package]
-name = "daisy-rust-lyd"
+name = "daisy-rust"
 version = "0.1.0"
 edition = "2021"
 
@@ -23,9 +23,15 @@ cortex-m-log = { version = "~0.7.0", features = ["itm", "semihosting", "log-inte
 cortex-m-semihosting = "0.3.5"
 panic-itm = { version = "~0.4.1" }
 panic-semihosting = "0.6"
-lyd = {path = "../lyd", features = ["no_std"]}
 spin = "0.9.8"
 smallvec = "1.6.1"
+
+# lyd seems to work better here than ljud
+
+# lyd = {path = "../lyd", features = ["no_std"]}
+# ljud = {path = "../ljud", features = ["no_std"]}
+# ljud = {version = "0.0.1-alpha.1", features = ["no_std"] }
+lyd = {version = "0.0.1", features = ["no_std"]}
 
 alloc-cortex-m = { version = "0.4.4"}
 
