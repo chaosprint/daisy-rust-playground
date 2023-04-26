@@ -1,8 +1,10 @@
-# daisy-rust-lyd
+# daisy-rust-playground
 
-Use [`lyd`](https://github.com/chaosprint/lyd) rust audio graph lib to make some sound on daisy board.
+A working prototype for Daisy Seed Rev 5.
 
-Just a wip and you need to manually download both repo to get some sound.
+I am developing [`lyd`](https://github.com/chaosprint/lyd), a rust audio lib, and it can now make some basic sound.
+
+An experimental idea is [`ljud`](https://github.com/chaosprint/ljud) which uses Box and dyn Trait.
 
 ## Usage
 
